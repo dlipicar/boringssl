@@ -523,6 +523,14 @@ OPENSSL_EXPORT int X509_add1_ext_i2d(X509 *x, int nid, void *value, int crit,
 OPENSSL_EXPORT int X509_sign(X509 *x509, const EVP_PKEY *pkey,
                              const EVP_MD *md);
 
+// X509_set_unsigned fills in the placeholder fields in `x509` to make an
+// unsigned certificate (RFC 9925) and returns one on success or zero on error.
+// It sets the signature algorithm to id-alg-unsigned and the signature value to
+// the empty string. If the issuer is empty, it additionally sets the issuer to
+// the id-rdna-unsigned placeholder value. Otherwise, it retains the existing
+// issuer value.
+OPENSSL_EXPORT int X509_set_unsigned(X509 *x509);
+
 // X509_sign_ctx signs `x509` with `ctx` and replaces the signature algorithm
 // and signature fields. It returns the length of the signature on success and
 // zero on error. The signature algorithm and parameters come from `ctx`, which
@@ -2631,9 +2639,11 @@ OPENSSL_EXPORT void X509_ALGOR_get0(const ASN1_OBJECT **out_obj,
 // constructing PSS and move on.
 OPENSSL_EXPORT int X509_ALGOR_set_md(X509_ALGOR *alg, const EVP_MD *md);
 
-// X509_ALGOR_cmp returns zero if `a` and `b` are equal, and some non-zero value
-// otherwise. Note this function can only be used for equality checks, not an
-// ordering.
+// X509_ALGOR_cmp compares `a` and `b`. It returns zero if they are equal, and a
+// negative or positive value if `a` sorts before or after `b`, respectively.
+// Values are ordered first by algorithm, then by parameter, with an absent
+// parameter sorting before a present one. The order is arbitrary but suitable
+// for sorting. Callers should not rely on the exact order.
 OPENSSL_EXPORT int X509_ALGOR_cmp(const X509_ALGOR *a, const X509_ALGOR *b);
 
 
@@ -2776,6 +2786,10 @@ OPENSSL_EXPORT ASN1_TYPE *X509_ATTRIBUTE_get0_type(X509_ATTRIBUTE *attr,
 // but an individual certificate verification may not necessarily treat every
 // trusted certificate as a trust anchor. See `X509_VERIFY_PARAM_set_trust` for
 // details.
+//
+// When this library uses a certificate as a trust anchor, the certificate's
+// fields are applied as constraints on the path, similar to RFC 5937. Expiry of
+// the trust anchor, via the notBefore and notAfter fields, is also applied.
 //
 // WARNING: Although a trusted certificate which fails the
 // `X509_VERIFY_PARAM_set_trust` check is functionally an untrusted
@@ -3251,9 +3265,6 @@ OPENSSL_EXPORT int X509_VERIFY_PARAM_set1(X509_VERIFY_PARAM *to,
 // this option. Critical extensions ensure the verifier does not bypass
 // unrecognized security restrictions in certificates.
 #define X509_V_FLAG_IGNORE_CRITICAL 0x10
-// X509_V_FLAG_X509_STRICT does nothing. Its functionality has been enabled by
-// default.
-#define X509_V_FLAG_X509_STRICT 0x00
 // X509_V_FLAG_ALLOW_PROXY_CERTS does nothing. Proxy certificate support has
 // been removed.
 #define X509_V_FLAG_ALLOW_PROXY_CERTS 0x40
@@ -3277,6 +3288,29 @@ OPENSSL_EXPORT int X509_VERIFY_PARAM_set1(X509_VERIFY_PARAM *to,
 // X509_V_FLAG_USE_DELTAS causes all verifications to fail. Delta CRL support
 // has been removed.
 #define X509_V_FLAG_USE_DELTAS 0x2000
+// X509_V_FLAG_PARTIAL_CHAIN treats all trusted certificates as trust anchors,
+// independent of the `X509_VERIFY_PARAM_set_trust` setting.
+#define X509_V_FLAG_PARTIAL_CHAIN 0x80000
+// X509_V_FLAG_NO_CHECK_TIME disables all time checks in certificate
+// verification.
+#define X509_V_FLAG_NO_CHECK_TIME 0x200000
+// X509_V_FLAG_USE_MTC_DRAFT_PLANTS_07 enables the verification of Merkle Tree
+// Certificates as specified in draft-ietf-plants-merkle-tree-certs-07.
+#define X509_V_FLAG_USE_MTC_DRAFT_PLANTS_07 0x400000
+// X509_V_FLAG_ALLOW_TIMEZONE_OFFSET allows `notBefore` and `notAfter` fields
+// to contain a time zone offset.
+#define X509_V_FLAG_ALLOW_TIMEZONE_OFFSET 0x1000000
+// X509_V_FLAG_ALLOW_SHA1 allows certificates and CRLs signed with SHA-1 to be
+// accepted during verification.
+// This flag is tentatively set by default. Users should add this explicitly if
+// they want to allow SHA-1.
+#define X509_V_FLAG_ALLOW_SHA1 0x2000000
+
+// Deprecated flags.
+
+// X509_V_FLAG_X509_STRICT does nothing. Its functionality has been enabled by
+// default.
+#define X509_V_FLAG_X509_STRICT 0x00
 // X509_V_FLAG_CHECK_SS_SIGNATURE does nothing. Historically it would check the
 // redundant signature on self-signed trust anchors. This check provided no
 // security benefit and only wasted CPU.
@@ -3284,20 +3318,8 @@ OPENSSL_EXPORT int X509_VERIFY_PARAM_set1(X509_VERIFY_PARAM *to,
 // X509_V_FLAG_TRUSTED_FIRST does nothing. The behavior it controls is always
 // enabled.
 #define X509_V_FLAG_TRUSTED_FIRST 0x0
-// X509_V_FLAG_PARTIAL_CHAIN treats all trusted certificates as trust anchors,
-// independent of the `X509_VERIFY_PARAM_set_trust` setting.
-#define X509_V_FLAG_PARTIAL_CHAIN 0x80000
 // X509_V_FLAG_NO_ALT_CHAINS does nothing.
 #define X509_V_FLAG_NO_ALT_CHAINS 0x0
-// X509_V_FLAG_NO_CHECK_TIME disables all time checks in certificate
-// verification.
-#define X509_V_FLAG_NO_CHECK_TIME 0x200000
-// X509_V_FLAG_ALLOW_TIMEZONE_OFFSET allows `notBefore` and `notAfter` fields
-// to contain a time zone offset.
-#define X509_V_FLAG_ALLOW_TIMEZONE_OFFSET 0x1000000
-// X509_V_FLAG_USE_MTC_DRAFT_PLANTS_07 enables the verification of Merkle Tree
-// Certificates as specified in draft-ietf-plants-merkle-tree-certs-07.
-#define X509_V_FLAG_USE_MTC_DRAFT_PLANTS_07 0x400000
 
 // X509_VERIFY_PARAM_set_flags enables all values in `flags` in `param`'s
 // verification flags and returns one. `flags` should be a combination of
